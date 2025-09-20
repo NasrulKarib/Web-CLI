@@ -1,0 +1,62 @@
+ body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .container {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        .input-group {
+            margin-bottom: 10px;
+        }
+        input[type="text"] {
+            width: 70%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            margin-top: 10px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #messages {
+            height: 300px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            overflow-y: auto;
+            background-color: #f9f9f9;
+        }
+        .message {
+            margin: 5px 0;
+            padding: 5px;
+            border-radius: 3px;
+        }
+        .sent {
+            background-color: #e3f2fd;
+            text-align: right;
+        }
+        .received {
+            background-color: #f1f8e9;
+        }
+        .status {
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .connected {
+            color: green;
+        }
+        .disconnected {
+            color: red;
+        }
