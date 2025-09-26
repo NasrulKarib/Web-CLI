@@ -2,16 +2,41 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
+	"os/user"
 	"runtime"
 	"strings"
 	"time"
 
 	"github.com/coder/websocket"
 )
+
+type SystemInfo struct{
+	Username string `json:"username"`
+	Hostname string `json:"hostname"`
+}
+
+func getSystemInfo() SystemInfo{
+	info := SystemInfo{
+		Username: "user",
+		Hostname: "web-cli",
+	}
+
+	if currentUser, err := user.Current(); err == nil{
+		info.Username = currentUser.Username
+	}
+
+	if hostname, err := os.Hostname(); err == nil {
+		info.Hostname = hostname
+	}
+	log.Printf("user: %s",info.Username);
+	return info
+}
 
 func executeCommand(command string) string {
 	command = strings.TrimSpace(command)
@@ -30,21 +55,18 @@ func executeCommand(command string) string {
 	cmdName := parts[0]
 	args := parts[1:]
 	
-	// Create command with 10-second timeout for safety
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 	
 	log.Printf("OS: %s", runtime.GOOS)
-	// Create the command
+	
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 
-	// Execute and capture both stdout and stderr
 	output, err := cmd.CombinedOutput()
 
-	// Handle different error cases
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return fmt.Sprintf("Error: command '%s' timed out after 10 seconds", command)
+			return fmt.Sprintf("Error: command '%s' timed out after 60 seconds", command)
 		}
 
 		// Check for "command not found" errors
@@ -81,48 +103,41 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*24)
 	defer cancel()
 
-	var commandBuffer strings.Builder
 	for {
-		// Read message from client
 		_, message, err := conn.Read(ctx)
 		if err != nil {
 			log.Printf("Read error: %v", err)
 			break
 		}
 
-		input := string(message)
+		input := strings.TrimSpace(string(message))
 
-		switch input {
-		case "\n": // Enter key pressed - execute command
-			command := strings.TrimSpace(commandBuffer.String())
-			if command != "" {
-				// Execute the accumulated command
-				output := executeCommand(command)
+		if input == "__GET_SYSTEM_INFO__" {
+            sysInfo := getSystemInfo()
+            infoJSON, _ := json.Marshal(sysInfo)
+            err = conn.Write(ctx, websocket.MessageText, []byte("__SYSTEM_INFO__:"+string(infoJSON)))
+            if err != nil {
+                log.Printf("Write error: %v", err)
+                break
+            }
+            continue
+        }
+		
+        if input == "\x03" {
+            continue
+        }
 
-				// Send command output back to client
-				err = conn.Write(ctx, websocket.MessageText, []byte(output))
-				if err != nil {
-					log.Printf("Write error: %v", err)
-					break
-				}
-			}
-			// Clear the command buffer after execution
-			commandBuffer.Reset()
+        // Execute command if not empty
+        if input != "" {
+            output := executeCommand(input)
 
-		case "\b": // Backspace key
-			// Remove last character from buffer
-			str := commandBuffer.String()
-			if len(str) > 0 {
-				commandBuffer.Reset()
-				commandBuffer.WriteString(str[:len(str)-1])
-			}
-
-		default:
-			// Regular character - add to command buffer
-			if len(input) == 1 && input[0] >= 32 && input[0] <= 126 {
-				commandBuffer.WriteString(input)
-			}
-		}
+            // Send command output back to client
+            err = conn.Write(ctx, websocket.MessageText, []byte(output))
+            if err != nil {
+                log.Printf("Write error: %v", err)
+                break
+            }
+        }
 	}
 
 	log.Println("Client disconnected")
