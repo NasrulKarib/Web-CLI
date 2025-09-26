@@ -30,6 +30,12 @@ fitAddon.fit();
 
 let ws = null
 let currentLine = '';
+let username = 'user';
+let hostname = 'web-cli';
+
+function writePrompt(){
+  term.write(`\x1b[32m${username}@${hostname}:\x1b[0m$ `);
+}
 
 function typewriterEffect(text, color = '', speed = 50) {
     return new Promise((resolve) => {
@@ -56,13 +62,27 @@ function connectWebSocket(){
 
     ws.onopen = async(event) =>{
       await typewriterEffect('✓ Connected to WebSocket server\n', '32', 30);
+      
+      if(ws && ws.readyState === WebSocket.OPEN){
+        ws.send('__GET_SYSTEM_INFO__');
+      }
+
       term.writeln('');
-      term.write('$ ');
+      writePrompt();
       currentLine = '';
     }
 
     ws.onmessage = (event)=>{
-      const output = event.data
+      const data = event.data
+
+      if(data.startsWith('__SYSTEM_INFO__:')){
+        const info = JSON.parse(data.replace('__SYSTEM_INFO__:',''));
+        username = info.username || 'user';
+        hostname = info.hostname || 'web-cli';
+        return;
+      }
+
+      const output = data;
       if(output.trim() != ''){
         term.write('\r\n' + output);
       }
