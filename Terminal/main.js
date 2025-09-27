@@ -30,11 +30,12 @@ fitAddon.fit();
 
 let ws = null
 let currentLine = '';
-let username = 'user';
-let hostname = 'web-cli';
+let username = 'arian';
+let hostname = 'ubuntu';
+
 
 function writePrompt(){
-  term.write(`\x1b[32m${username}@${hostname}:\x1b[0m$ `);
+  term.write(`\x1b[38;5;120m${username}@${hostname}:\x1b[0m$ `);
 }
 
 function typewriterEffect(text, color = '', speed = 50) {
@@ -61,11 +62,7 @@ function connectWebSocket(){
     ws = new WebSocket('ws://localhost:8080/ws')
 
     ws.onopen = async(event) =>{
-      await typewriterEffect('✓ Connected to WebSocket server\n', '32', 30);
-      
-      if(ws && ws.readyState === WebSocket.OPEN){
-        ws.send('__GET_SYSTEM_INFO__');
-      }
+      await typewriterEffect('✓ Connected to WebSocket server\n', '38;5;120', 30);
 
       term.writeln('');
       writePrompt();
@@ -84,9 +81,9 @@ function connectWebSocket(){
 
       const output = data;
       if(output.trim() != ''){
-        term.write('\r\n' + output);
+        term.writeln('\r\n' + output);
       }
-      term.write('\r\n$ ');
+      writePrompt();
       currentLine = '';
     }
 
@@ -116,7 +113,8 @@ term.onData(e => {
   
   if (charCode === 13) {  
     if(ws && ws.readyState === WebSocket.OPEN){
-      ws.send('\n');
+      ws.send(currentLine);
+      currentLine = '';
     }
   } 
   
@@ -125,10 +123,6 @@ term.onData(e => {
       currentLine = currentLine.slice(0, -1);
 
       term.write('\b \b');
-
-      if(ws && ws.readyState === WebSocket.OPEN){
-        ws.send('\b');
-      }
       
     }
   } 
@@ -137,11 +131,6 @@ term.onData(e => {
     currentLine += e
 
     term.write(e);
-    if(ws && ws.readyState === WebSocket.OPEN){
-      ws.send(e);
-    }  else {
-        term.write(' \x1b[33m[offline]\x1b[0m');
-    }
   }
 
   else if (charCode === 3) { 
