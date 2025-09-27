@@ -46,7 +46,6 @@ func executeCommand(command string) string {
 
 	log.Printf("Executing command: %s", command)
 	
-	// Parse command and arguments
 	parts := strings.Fields(command)
 	if len(parts) == 0 {
 		return "Error: empty command"
@@ -69,18 +68,15 @@ func executeCommand(command string) string {
 			return fmt.Sprintf("Error: command '%s' timed out after 60 seconds", command)
 		}
 
-		// Check for "command not found" errors
 		if strings.Contains(err.Error(), "not found") ||
 			strings.Contains(err.Error(), "cannot find") ||
 			strings.Contains(err.Error(), "executable file not found") {
 			return fmt.Sprintf("Error: command '%s' not found", cmdName)
 		}
 
-		// Return the actual error for other cases
 		return fmt.Sprintf("Error executing '%s': %s", command, err.Error())
 	}
 
-	// Return command output
 	if len(output) == 0 {
 		return fmt.Sprintf("Command '%s' executed successfully (no output)", command)
 	}
@@ -100,6 +96,14 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	log.Println("Client connected")
 
+	sysInfo := getSystemInfo()
+    infoJSON, _ := json.Marshal(sysInfo)
+    err = conn.Write(context.Background(), websocket.MessageText, []byte("__SYSTEM_INFO__:"+string(infoJSON)))
+    if err != nil {
+        log.Printf("Failed to send system info: %v", err)
+        return
+    }
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*24)
 	defer cancel()
 
@@ -111,23 +115,11 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 
 		input := strings.TrimSpace(string(message))
-
-		if input == "__GET_SYSTEM_INFO__" {
-            sysInfo := getSystemInfo()
-            infoJSON, _ := json.Marshal(sysInfo)
-            err = conn.Write(ctx, websocket.MessageText, []byte("__SYSTEM_INFO__:"+string(infoJSON)))
-            if err != nil {
-                log.Printf("Write error: %v", err)
-                break
-            }
-            continue
-        }
 		
         if input == "\x03" {
             continue
         }
 
-        // Execute command if not empty
         if input != "" {
             output := executeCommand(input)
 
