@@ -34,32 +34,27 @@ func getSystemInfo() SystemInfo{
 	if hostname, err := os.Hostname(); err == nil {
 		info.Hostname = hostname
 	}
-	log.Printf("user: %s",info.Username);
 	return info
 }
 
 func executeCommand(command string) string {
-	command = strings.TrimSpace(command)
-	if command == "" {
-		return ""
-	}
-
 	log.Printf("Executing command: %s", command)
 	
-	parts := strings.Fields(command)
-	if len(parts) == 0 {
-		return "Error: empty command"
-	}
+	if strings.TrimSpace(command) == "" {
+        return "Error: empty command"
+    }
 	
-	cmdName := parts[0]
-	args := parts[1:]
-	
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	
 	log.Printf("OS: %s", runtime.GOOS)
 	
-	cmd := exec.CommandContext(ctx, cmdName, args...)
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.CommandContext(ctx, "cmd", "/C", command)
+	} else {
+		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	}
 
 	output, err := cmd.CombinedOutput()
 
@@ -71,14 +66,14 @@ func executeCommand(command string) string {
 		if strings.Contains(err.Error(), "not found") ||
 			strings.Contains(err.Error(), "cannot find") ||
 			strings.Contains(err.Error(), "executable file not found") {
-			return fmt.Sprintf("Error: command '%s' not found", cmdName)
+			return fmt.Sprintf("Error: command '%s' not found", command)
 		}
 
 		return fmt.Sprintf("Error executing '%s': %s", command, err.Error())
 	}
 
 	if len(output) == 0 {
-		return fmt.Sprintf("Command '%s' executed successfully (no output)", command)
+		return fmt.Sprintf("Command '%s' executed successfully", command)
 	}
 
 	return string(output)
