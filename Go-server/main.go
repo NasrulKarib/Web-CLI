@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -11,6 +13,7 @@ import (
 	"os/user"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -19,6 +22,11 @@ import (
 type SystemInfo struct{
 	Username string `json:"username"`
 	Hostname string `json:"hostname"`
+}
+
+type OutputMessage struct{
+	Type string `json:"type"`
+	Content string `json:"content"`
 }
 
 func getSystemInfo() SystemInfo{
@@ -37,49 +45,107 @@ func getSystemInfo() SystemInfo{
 	return info
 }
 
-func executeCommand(command string) string {
-	log.Printf("Executing command: %s", command)
-	
-	if strings.TrimSpace(command) == "" {
-        return "Error: empty command"
+func executeCommand(command string, conn *websocket.Conn) {
+    log.Printf("Executing command: %s", command)
+    
+    if strings.TrimSpace(command) == "" {
+        sendMessage(conn, "system", "Error: empty command")
+        return
     }
-	
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	
-	log.Printf("OS: %s", runtime.GOOS)
-	
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(ctx, "cmd", "/C", command)
-	} else {
-		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", command)
-	}
+    
+    cmdCtx, cmdCancel := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cmdCancel()
+        
+    var cmd *exec.Cmd
+    if runtime.GOOS == "windows" {
+        cmd = exec.CommandContext(cmdCtx, "cmd", "/C", command)
+    } else {
+        cmd = exec.CommandContext(cmdCtx, "/bin/sh", "-c", command)
+    }
 
-	output, err := cmd.CombinedOutput()
+    stdoutPipe, err := cmd.StdoutPipe()
+    if err != nil {
+        sendMessage(conn, "stderr", fmt.Sprintf("Error creating stdout pipe: %v", err))
+        return
+    }
 
-	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return fmt.Sprintf("Error: command '%s' timed out after 60 seconds", command)
-		}
+    stderrPipe, err := cmd.StderrPipe()
+    if err != nil{
+        sendMessage(conn, "stderr", fmt.Sprintf("Error creating stderr pipe: %v", err))
+        return
+    }
+    if err := cmd.Start(); err != nil {
+        sendMessage(conn, "stderr", fmt.Sprintf("Error starting command: %v", err))
+        return
+    }
 
-		if strings.Contains(err.Error(), "not found") ||
-			strings.Contains(err.Error(), "cannot find") ||
-			strings.Contains(err.Error(), "executable file not found") {
-			return fmt.Sprintf("Error: command '%s' not found", command)
-		}
+    var wg sync.WaitGroup
+    wg.Add(2)
 
-		return fmt.Sprintf("Error executing '%s': %s", command, err.Error())
-	}
+    go func(){
+        defer wg.Done()
+        streamOutput(stdoutPipe, conn, "stdout")
+    }()
 
-	if len(output) == 0 {
-		return fmt.Sprintf("Command '%s' executed successfully", command)
-	}
+    go func(){
+        defer wg.Done()
+        streamOutput(stderrPipe, conn, "stderr")
+    }()
+    
+    
+    wg.Wait()
+        
+	err = cmd.Wait()
 
-	return string(output)
+        
+    if err != nil {
+        if cmdCtx.Err() == context.DeadlineExceeded {
+            sendMessage(conn, "stderr", fmt.Sprintf("Command '%s' timed out after 30 seconds", command))
+        } 
+    }
+    
+    sendMessage(conn, "system", "__COMMAND_COMPLETE__")
+}
+
+func streamOutput(pipe io.ReadCloser, conn *websocket.Conn, outputType string) {
+    reader := bufio.NewReader(pipe)
+    buf := make([]byte, 1024) // chunk size = 1024 byte
+    for {
+        n, err := reader.Read(buf)
+        if n > 0 {
+            sendMessage(conn, outputType, string(buf[:n]))
+        }
+        if err != nil {
+            if err != io.EOF {
+                log.Printf("Error reading %s: %v", outputType, err)
+            }
+            break
+        }
+    }
+}
+
+
+func sendMessage(conn *websocket.Conn, msgType, content string) {
+
+    msg := OutputMessage{
+        Type: msgType,
+        Content: content,
+    }
+
+    msgJSON, err := json.Marshal(msg)
+    if err != nil {
+        log.Printf("Error marshaling message: %v", err)
+        return
+    }
+
+    err = conn.Write(context.Background(), websocket.MessageText, msgJSON)
+    if err != nil {
+        log.Printf("Error sending message: %v", err)
+    }
 }
 
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
+
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 	})
@@ -93,37 +159,33 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	sysInfo := getSystemInfo()
     infoJSON, _ := json.Marshal(sysInfo)
+
     err = conn.Write(context.Background(), websocket.MessageText, []byte("__SYSTEM_INFO__:"+string(infoJSON)))
     if err != nil {
         log.Printf("Failed to send system info: %v", err)
         return
     }
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*24)
-	defer cancel()
+	sessionCtx, sessionCancel := context.WithTimeout(context.Background(), time.Hour*24)
+	defer sessionCancel()
 
 	for {
-		_, message, err := conn.Read(ctx)
+		_, message, err := conn.Read(sessionCtx)
 		if err != nil {
 			log.Printf("Read error: %v", err)
+			sessionCancel()
 			break
 		}
 
 		input := strings.TrimSpace(string(message))
 		
         if input == "\x03" {
+			log.Println("Received Ctrl+C from client")
             continue
         }
 
         if input != "" {
-            output := executeCommand(input)
-
-            // Send command output back to client
-            err = conn.Write(ctx, websocket.MessageText, []byte(output))
-            if err != nil {
-                log.Printf("Write error: %v", err)
-                break
-            }
+            go executeCommand(input, conn)
         }
 	}
 
