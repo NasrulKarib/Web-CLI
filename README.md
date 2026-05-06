@@ -1,98 +1,101 @@
-# WebSocket Real-Time Communication Project
+# Web CLI
 
-This project demonstrates real-time communication between a web client and Go server using WebSocket technology.
+Browser-based interactive terminal powered by Go, PTY, and xterm.js.
 
-## Project Overview
+## Architecture
 
-The project consists of two main components:
-- **Go Server**: WebSocket server that handles connections and echoes messages
-- **Web Client**: HTML/CSS/JavaScript frontend for user interaction
+```
+Browser (xterm.js) ──WebSocket──▶ Go Server ──PTY──▶ /bin/bash
+                                   │
+                                   ├── HTTP handler (upgrade)
+                                   ├── Service layer (lifecycle)
+                                   └── Domain layer (PTY wrapper)
+```
 
-## Features
-
-- ✅ Real-time bidirectional communication via WebSocket
-- ✅ Client sends messages to Go server
-- ✅ Server echoes messages back to client
-- ✅ Connection status indicators
-- ✅ Clean separation between frontend and backend
-- ✅ CORS enabled for cross-origin requests
-- ✅ Interactive web interface with connect/disconnect functionality
+Single binary serves both the frontend and the WebSocket backend. No separate frontend build step.
 
 ## Project Structure
 
 ```
-Websocket with Go/
-├── Go server/
-│   ├── main.go          # WebSocket server implementation
-│   ├── go.mod           # Go module dependencies
-│   └── go.sum           # Dependency checksums
-├── Client/
-│   ├── index.html       # Web interface
-│   ├── client.js        # WebSocket client logic
-│   └── style.css        # Styling
-└── README.md
+Go-server/
+├── main.go                                        # App entry: config → services → router → server
+├── go.mod / go.sum
+├── internal/
+│   ├── config/
+│   │   └── config.go                              # Environment variable management
+│   ├── domain/
+│   │   └── shell.go                               # PTY wrapper (NewShell, Read, Write, Resize, Close)
+│   ├── usecase/
+│   │   └── shell_service.go                       # PTY lifecycle orchestration with thread safety
+│   └── infrastructure/
+│       └── http/
+│           ├── handler_shell_ws.go                 # WebSocket ↔ PTY bridge (bi-directional)
+│           ├── handler_template.go                 # HTML template rendering
+│           └── router.go                           # Routes + CORS/logging middleware
+└── web/
+    ├── index.html                                  # Terminal UI (CDN xterm.js)
+    └── js/
+        └── main.js                                 # WebSocket client with PTY protocol
 ```
 
-## Requirements
+## Quick Start
 
-- Go 1.16 or later
-- Modern web browser with WebSocket support
-
-## Installation & Setup
-
-1. **Navigate to the project directory:**
-   ```bash
-   cd "c:\Programming\Websocket with Go"
-   ```
-
-2. **Install Go dependencies:**
-   ```bash
-   cd "Go server"
-   go mod tidy
-   ```
-
-## Running the Application
-
-### 1. Start the Go Server
 ```bash
-cd "Go server"
+cd Go-server
 go run main.go
 ```
-Server will start on `http://localhost:8080`
-WebSocket endpoint: `ws://localhost:8080/ws`
 
-### 2. Open the Client
-Navigate to the `Client` folder and open `index.html` in your web browser, or serve it using:
+Open `http://localhost:8080` in your browser. You'll get an interactive bash shell.
+
+## Configuration
+
+Environment variables with defaults:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HOST` | `0.0.0.0` | Server bind address |
+| `PORT` | `8080` | Server port |
+
 ```bash
-cd Client
-python -m http.server 3000
+PORT=9090 go run main.go
 ```
-Then open `http://localhost:3000`
 
-## How It Works
+## WebSocket Protocol
 
-1. **Client Connection**: Web client connects to WebSocket server at `ws://localhost:8080/ws`
-2. **Message Flow**: 
-   - User types message in input field
-   - Client sends message via WebSocket
-   - Server receives message and prints "Client said: [message]"
-   - Server echoes back "Echo: [message]"
-   - Client displays the echo response
-3. **Real-time Communication**: Messages are exchanged instantly without page refresh
+JSON messages over WebSocket:
 
-## Usage Example
+**Client → Server:**
+```json
+{"type": "input", "data": "ls -la\n"}
+{"type": "resize", "rows": 40, "cols": 120}
+```
 
-1. Open the web client in your browser
-2. Click "Connect" to establish WebSocket connection
-3. Type "hello" in the input field
-4. Click "Send" or press Enter
-5. See the server response: "Echo: hello"
+**Server → Client:**
+```json
+{"type": "output", "data": "terminal output..."}
+{"type": "error", "data": "error message"}
+```
 
 ## Dependencies
 
-- **Go Server**: `github.com/gorilla/websocket` - WebSocket implementation
-- **Client**: Pure HTML/CSS/JavaScript - No external dependencies
+| Package | Purpose |
+|---------|---------|
+| `github.com/coder/websocket` | WebSocket server (context-aware) |
+| `github.com/creack/pty` | PTY allocation for interactive shell |
+| `xterm.js` (CDN) | Terminal emulator in browser |
 
-## License
+## Requirements
 
-This project is licensed under the MIT License.
+- Go 1.24+
+- Linux (PTY support required)
+- `/bin/bash` available
+
+## Graceful Shutdown
+
+`Ctrl+C` triggers graceful shutdown — active PTY sessions are cleaned up within 10 seconds with no orphaned processes.
+
+## Limitations
+
+- **Single session** — only one WebSocket client can have an active shell at a time
+- **No authentication** — anyone with access can get a shell (local/trusted use only)
+- **No persistence** — container filesystem is ephemeral on cloud deployments
