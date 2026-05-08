@@ -7,24 +7,12 @@ Web-CLI.code-workspace
 .vscode
 
 # Go build artifacts
-Go-server/websocket-server
-Go-server/*.exe
-Go-server/*.out
-Go-server/*.test
+websocket-server
+*.exe
+*.out
+*.test
 
-# Go module cache and build cache (optional, usually not needed)
-Go-server/pkg/
-Go-server/bin/
-
-# IDE/editor files (if not already covered)
-Go-server/.idea/
-Go-server/.vscode/
-
-# OS-specific files
-Go-server/.DS_Store
 
 # Local environment files
-Go-server/.env
+.env
 
-# Test output
-Go-server/coverage.out
