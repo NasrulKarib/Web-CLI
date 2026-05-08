@@ -15,4 +15,5 @@ websocket-server
 
 # Local environment files
 .env
+./websocket-server
 
