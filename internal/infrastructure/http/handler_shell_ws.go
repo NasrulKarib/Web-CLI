@@ -30,14 +30,16 @@ type outboundMsg struct {
 	Data string `json:"data"`
 }
 
-// ShellWSHandler handles WebSocket connections for PTY shell sessions.
+
+// A new ShellService is created per connection via the factory, giving each
+// user their own isolated PTY session.
 type ShellWSHandler struct {
-	shellService *usecase.ShellService
+	factory func() *usecase.ShellService
 }
 
-// NewShellWSHandler creates a new ShellWSHandler with the given ShellService.
-func NewShellWSHandler(shellService *usecase.ShellService) *ShellWSHandler {
-	return &ShellWSHandler{shellService: shellService}
+// NewShellWSHandler creates a new ShellWSHandler with the given factory function.
+func NewShellWSHandler(factory func() *usecase.ShellService) *ShellWSHandler {
+	return &ShellWSHandler{factory: factory}
 }
 
 // Handle upgrades an HTTP connection to WebSocket and bridges it with a PTY shell.
@@ -51,18 +53,21 @@ func (h *ShellWSHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "session ended")
 
+	// Each connection gets its own isolated shell session.
+	shellService := h.factory()
+
 	rows, cols := parseTerminalSize(r.URL.Query())
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	if err := h.shellService.Start(ctx, rows, cols); err != nil {
+	if err := shellService.Start(ctx, rows, cols); err != nil {
 		sendError(conn, ctx, err.Error())
 		log.Printf("websocket: failed to start shell: %v", err)
 		return
 	}
 	defer func() {
-		if err := h.shellService.Stop(); err != nil {
+		if err := shellService.Stop(); err != nil {
 			log.Printf("websocket: shell stop error: %v", err)
 		}
 	}()
@@ -73,20 +78,20 @@ func (h *ShellWSHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer wg.Done()
 		defer cancel()
-		h.pumpInput(ctx, conn)
+		pumpInput(ctx, conn, shellService)
 	}()
 
 	go func() {
 		defer wg.Done()
 		defer cancel()
-		h.pumpOutput(ctx, conn)
+		pumpOutput(ctx, conn, shellService)
 	}()
 
 	wg.Wait()
 }
 
 // pumpInput reads messages from the WebSocket and forwards them to the PTY.
-func (h *ShellWSHandler) pumpInput(ctx context.Context, conn *websocket.Conn) {
+func pumpInput(ctx context.Context, conn *websocket.Conn, shellService *usecase.ShellService) {
 	for {
 		_, data, err := conn.Read(ctx)
 		if err != nil {
@@ -104,12 +109,12 @@ func (h *ShellWSHandler) pumpInput(ctx context.Context, conn *websocket.Conn) {
 
 		switch msg.Type {
 		case "input":
-			if _, err := h.shellService.Write([]byte(msg.Data)); err != nil {
+			if _, err := shellService.Write([]byte(msg.Data)); err != nil {
 				log.Printf("websocket: PTY write error: %v", err)
 				return
 			}
 		case "resize":
-			if err := h.shellService.Resize(msg.Rows, msg.Cols); err != nil {
+			if err := shellService.Resize(msg.Rows, msg.Cols); err != nil {
 				log.Printf("websocket: PTY resize error: %v", err)
 			}
 		default:
@@ -121,9 +126,9 @@ func (h *ShellWSHandler) pumpInput(ctx context.Context, conn *websocket.Conn) {
 // pumpOutput reads PTY output and forwards it to the WebSocket.
 // Uses ReadContext so the pump exits immediately on context cancellation,
 // even if the underlying PTY read is blocked.
-func (h *ShellWSHandler) pumpOutput(ctx context.Context, conn *websocket.Conn) {
+func pumpOutput(ctx context.Context, conn *websocket.Conn, shellService *usecase.ShellService) {
 	for {
-		output, err := h.shellService.ReadContext(ctx)
+		output, err := shellService.ReadContext(ctx)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return

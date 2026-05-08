@@ -16,8 +16,9 @@ type Router struct {
 }
 
 // NewRouter creates a Router with all routes and middleware wired up.
+// factory is called once per WebSocket connection to create an isolated ShellService.
 // webRoot is the path to the frontend assets directory (e.g., "web").
-func NewRouter(shellService *usecase.ShellService, webRoot string) (*Router, error) {
+func NewRouter(factory func() *usecase.ShellService, webRoot string) (*Router, error) {
 	mux := http.NewServeMux()
 
 	templateHandler, err := NewTemplateHandler(webRoot)
@@ -27,7 +28,7 @@ func NewRouter(shellService *usecase.ShellService, webRoot string) (*Router, err
 
 	router := &Router{
 		mux:          mux,
-		shellHandler: NewShellWSHandler(shellService),
+		shellHandler: NewShellWSHandler(factory),
 	}
 
 	// WebSocket endpoint.
@@ -66,7 +67,7 @@ func (r *Router) corsMiddleware(next http.Handler) http.Handler {
 
 func (r *Router) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		log.Printf("%s %s — %s", req.Method, req.URL.Path, req.RemoteAddr)
+		log.Printf("%s %s â %s", req.Method, req.URL.Path, req.RemoteAddr)
 		next.ServeHTTP(w, req)
 	})
 }
