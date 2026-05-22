@@ -10,14 +10,16 @@ import (
 
 // ShellService manages PTY lifecycle at business logic level.
 type ShellService struct {
-	shell *domain.Shell // Current active shell (nil if no session).
-	mu    sync.Mutex    // Protects shell pointer mutations (Start, Stop, Resize).
+	shell     *domain.Shell
+	shellPath string
+	mu        sync.Mutex // Protect concurrent access
 }
 
 // NewShellService creates and returns a new ShellService instance.
-func NewShellService() *ShellService {
+func NewShellService(shellPath string) *ShellService {
 	return &ShellService{
-		shell: nil,
+		shell:     nil,
+		shellPath: shellPath,
 	}
 }
 
@@ -30,7 +32,7 @@ func (s *ShellService) Start(_ context.Context, rows, cols uint16) error {
 		return errors.New("shell session already active")
 	}
 
-	shell, err := domain.NewShell(rows, cols)
+	shell, err := domain.NewShell(s.shellPath, rows, cols)
 	if err != nil {
 		return err
 	}
@@ -40,8 +42,6 @@ func (s *ShellService) Start(_ context.Context, rows, cols uint16) error {
 }
 
 // Write sends data to the active shell session.
-// No mutex: PTY fd supports concurrent read/write. Write only accesses
-// s.shell which is stable during the handler's lifetime (Stop runs after goroutines exit).
 func (s *ShellService) Write(data []byte) (int, error) {
 	if s.shell == nil {
 		return 0, errors.New("no active shell session")
@@ -51,7 +51,6 @@ func (s *ShellService) Write(data []byte) (int, error) {
 }
 
 // Read retrieves output from the active shell session (blocking).
-// Prefer ReadContext for goroutine-safe cancellation.
 func (s *ShellService) Read() ([]byte, error) {
 	if s.shell == nil {
 		return nil, errors.New("no active shell session")

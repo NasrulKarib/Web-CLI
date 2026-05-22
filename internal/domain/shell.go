@@ -17,9 +17,9 @@ type Shell struct {
 	cols uint16
 }
 
-// Spawn a new bash shell with PTY and returns a Shell instance
-func NewShell(rows, cols uint16) (*Shell, error) {
-	cmd := exec.Command("/bin/bash")
+// NewShell spawns a new shell with PTY.
+func NewShell(shell string, rows, cols uint16) (*Shell, error) {
+	cmd := exec.Command(shell)
 
 	ptyFile, err := pty.Start(cmd)
 	if err != nil {

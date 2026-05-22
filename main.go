@@ -17,7 +17,11 @@ import (
 func main() {
 	cfg := config.Load()
 
-	router, err := infrahttp.NewRouter(usecase.NewShellService, "web")
+	shellServiceFactory := func() *usecase.ShellService {
+		return usecase.NewShellService(cfg.ShellDefault)
+	}
+
+	router, err := infrahttp.NewRouter(shellServiceFactory, "web")
 	if err != nil {
 		log.Fatalf("failed to initialize router: %v", err)
 	}
